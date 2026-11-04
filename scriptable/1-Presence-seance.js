@@ -44,6 +44,7 @@ const NOMS_BLOCS = { gauche: "Gauche", socle: "Socle commun", rn: "RN-UDR", autr
 const SIGLES = { "LFI-NFP": "LFI", "UDDPLR": "UDR" };
 
 const SEUIL_ANCIEN_MIN = 30;   // au-delà, l'heure de mise à jour passe en orange
+const TAILLE_APERCU = "medium";
 
 // ==========================================================================
 // Outils communs
@@ -110,7 +111,7 @@ function point(pile, couleur, taille = 7) {
 }
 
 /** En-tête commun : icône + titre en capitales à gauche, heure de mise à jour à droite. */
-function entete(pile, symbole, titre, d, horsLigne) {
+function entete(pile, symbole, titre, d, horsLigne, taille = null) {
   const l = pile.addStack();
   l.layoutHorizontally();
   l.centerAlignContent();
@@ -123,9 +124,35 @@ function entete(pile, symbole, titre, d, horsLigne) {
   texte(l, titre, 10, { gras: true, couleur: COULEURS.secondaire });
   l.addSpacer();
   const ancien = horsLigne || (Date.now() - Date.parse(d.genereLe)) / 60000 > SEUIL_ANCIEN_MIN;
-  texte(l, ancien ? `données de ${hm(d.genereLe)}` : `màj ${hm(d.genereLe)}`, 9.5,
-    { poids: ancien ? "semi" : "medium", couleur: ancien ? COULEURS.alerte : COULEURS.secondaire });
+  const libelle = ancien ? `données de ${hm(d.genereLe)}` : `màj ${hm(d.genereLe)}`;
+  const couleur = ancien ? COULEURS.alerte : COULEURS.secondaire;
+  if (taille) boutonActualiser(l, libelle, couleur, taille);     // moyen et grand : l'heure devient un bouton
+  else texte(l, libelle, 9.5, { poids: ancien ? "semi" : "medium", couleur });
 }
+
+/**
+ * Bouton « actualiser » : ouvre Scriptable, relance ce script et affiche aussitôt les données fraîches.
+ * (iOS n'autorise pas un vrai bouton qui recharge le widget sans ouvrir d'application.)
+ * Disponible en tailles moyenne et grande : sur un petit widget, iOS n'accepte qu'un seul lien.
+ */
+const URL_ACTUALISER = taille => `scriptable:///run/${encodeURIComponent(Script.name())}?taille=${taille}`;
+function boutonActualiser(pile, libelle, couleur, taille) {
+  const b = pile.addStack();
+  b.layoutHorizontally();
+  b.centerAlignContent();
+  b.backgroundColor = COULEURS.carte;
+  b.cornerRadius = 7;
+  b.setPadding(2, 6, 2, 6);
+  b.url = URL_ACTUALISER(taille);
+  const sym = SFSymbol.named("arrow.clockwise");
+  sym.applyFont(Font.boldSystemFont(9));
+  const img = b.addImage(sym.image);
+  img.imageSize = new Size(9, 9);
+  img.tintColor = couleur;
+  b.addSpacer(3);
+  texte(b, libelle, 9.5, { poids: "semi", couleur });
+}
+
 
 function widgetErreur(message) {
   const w = new ListWidget();
@@ -139,8 +166,36 @@ function widgetErreur(message) {
 // ==========================================================================
 // Demi-cercle de 577 sièges
 // ==========================================================================
-/** Place les sièges sur des rangées concentriques, puis les attribue aux blocs de gauche à droite. */
+const BLOC_CODE = { g: "gauche", s: "socle", r: "rn", a: "autres" };
+
+/**
+ * Hémicycle réel : chaque point est le vrai siège d'un député (plan officiel de l'Assemblée).
+ * Votants en couleur vive, députés qui n'ont pas voté dans la couleur de leur bloc, très pâle.
+ */
+function dessinerHemicycleReel(h, largeur, hauteur) {
+  const ctx = new DrawContext();
+  ctx.size = new Size(largeur, hauteur);
+  ctx.opaque = false;
+  ctx.respectScreenScale = true;
+  const k = Math.min(largeur / h.largeur, hauteur / h.hauteur);
+  const dx = (largeur - h.largeur * k) / 2, dy = (hauteur - h.hauteur * k) / 2;
+  const r = 12 * k;                                                // rayon d’un siège
+  // d'abord les sièges vides, puis les votants par-dessus
+  for (const passe of [0, 1]) for (const [x, y, b, vote] of h.sieges) {
+    if (vote !== passe) continue;
+    ctx.setFillColor(new Color(POINTS[BLOC_CODE[b]], vote ? 1 : 0.2));
+    ctx.fillEllipse(new Rect(dx + x * k - r, dy + y * k - r, 2 * r, 2 * r));
+  }
+  return ctx.getImage();
+}
+
+/** Demi-cercle : plan réel si le serveur le fournit, sinon schéma théorique (ancienne version). */
 function dessinerHemicycle(d, largeur, hauteur) {
+  return d.hemicycle ? dessinerHemicycleReel(d.hemicycle, largeur, hauteur) : dessinerHemicycleSchema(d, largeur, hauteur);
+}
+
+/** Schéma de secours : rangées concentriques attribuées aux blocs de gauche à droite. */
+function dessinerHemicycleSchema(d, largeur, hauteur) {
   const total = d.sieges;
   const rangs = 10, rMin = 0.36;
   const rayons = [...Array(rangs)].map((_, i) => rMin + (1 - rMin) * i / (rangs - 1));
@@ -296,7 +351,7 @@ function nouveauWidget(d, padding) {
 /** Moyen : demi-cercle et total à gauche, les 12 groupes à droite. */
 function construireMoyen(d, horsLigne) {
   const w = nouveauWidget(d, [11, 13, 10, 13]);
-  entete(w, "person.3.fill", "PRÉSENCE EN SÉANCE", d, horsLigne);
+  entete(w, "person.3.fill", "PRÉSENCE EN SÉANCE", d, horsLigne, "medium");
   w.addSpacer(6);
 
   const corps = w.addStack();
@@ -330,7 +385,7 @@ function construireMoyen(d, horsLigne) {
 /** Grand : demi-cercle centré, total, groupes sur 3 colonnes, puis les 3 derniers scrutins. */
 function construireGrand(d, horsLigne) {
   const w = nouveauWidget(d, [13, 14, 12, 14]);
-  entete(w, "person.3.fill", "PRÉSENCE EN SÉANCE", d, horsLigne);
+  entete(w, "person.3.fill", "PRÉSENCE EN SÉANCE", d, horsLigne, "large");
   w.addSpacer(6);
 
   const haut = w.addStack();
@@ -363,6 +418,8 @@ function construireGrand(d, horsLigne) {
 /** Petit : demi-cercle, total, totaux des blocs. */
 function construirePetit(d, horsLigne) {
   const w = nouveauWidget(d, [11, 12, 10, 12]);
+  // petit widget : un seul lien possible. Paramètre « actualiser » → le toucher actualise au lieu d'ouvrir le site
+  if ((args.widgetParameter || "").toLowerCase().includes("actualiser")) w.url = URL_ACTUALISER("small");
   entete(w, "person.3.fill", "PRÉSENCE", d, horsLigne);
   w.addSpacer(5);
   const img = w.addImage(dessinerHemicycle(d, 264, 132));
@@ -389,5 +446,11 @@ const widget = !d ? widgetErreur("Vérifiez la connexion. Le widget réessaiera 
 widget.refreshAfterDate = new Date(Date.now() + 5 * 60 * 1000);    // iOS décide du moment exact
 
 if (config.runsInWidget) Script.setWidget(widget);
-else await widget.presentMedium();                                  // aperçu quand on lance le script dans l'app
+else {
+  // lancé depuis l'app ou par le bouton « actualiser » : aperçu à la taille du widget
+  const t = (args.queryParameters || {}).taille || TAILLE_APERCU;
+  if (t === "small") await widget.presentSmall();
+  else if (t === "large") await widget.presentLarge();
+  else await widget.presentMedium();
+}
 Script.complete();

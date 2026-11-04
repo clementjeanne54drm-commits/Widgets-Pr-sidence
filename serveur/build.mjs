@@ -129,7 +129,7 @@ const libelleJour = (dateIso, jourSemaine) => `${jourSemaine} ${+dateIso.slice(8
 
 async function ecrireJSON(nom, objet) {
   const cible = path.join(OUT, nom);
-  await writeFile(cible + '.tmp', JSON.stringify(objet, null, 1));
+  await writeFile(cible + '.tmp', JSON.stringify(objet));
   await rename(cible + '.tmp', cible);                               // écriture atomique
 }
 
@@ -237,9 +237,9 @@ async function detecterLegislature(etat) {
 // 2. Députés en exercice → groupe (AMO10, rafraîchi une fois par jour)
 // ---------------------------------------------------------------------------
 async function chargerDeputes(leg, etat) {
-  if (etat.amo?.leg === leg && Date.now() - etat.amo.le < 24 * H) return etat.amo;
+  if (etat.amo?.leg === leg && etat.amo.places && Date.now() - etat.amo.le < 24 * H) return etat.amo;
   const zip = ouvrirZip(await get(`${DATA}/static/openData/repository/${leg}/amo/deputes_actifs_mandats_actifs_organes/AMO10_deputes_actifs_mandats_actifs_organes.json.zip`, { type: 'buffer', timeout: 120_000 }));
-  const groupes = {}, deputes = {};
+  const groupes = {}, deputes = {}, places = {};
   let assemblee = null;
   for (const e of zip.entrees) {
     if (/\/organe\/PO\d+\.json$/.test(e.nom)) {
@@ -252,16 +252,73 @@ async function chargerDeputes(leg, etat) {
     const a = zip.json(e).acteur;
     for (const m of liste(a.mandats?.mandat)) {
       if (m.dateFin) continue;
-      if (m.typeOrgane === 'ASSEMBLEE') assemblee = liste(m.organes?.organeRef)[0];
+      if (m.typeOrgane === 'ASSEMBLEE') {
+        assemblee = liste(m.organes?.organeRef)[0];
+        const place = m.mandature?.placeHemicycle;      // n° de siège, ex. « 089 »
+        if (place) places[a.uid?.['#text'] ?? a.uid] = +place;
+      }
       if (m.typeOrgane === 'GP' && groupes[liste(m.organes?.organeRef)[0]]) {
         const g = liste(m.organes.organeRef)[0];
         deputes[a.uid?.['#text'] ?? a.uid] = g; groupes[g].membres++;
       }
     }
   }
-  etat.amo = { leg, le: Date.now(), groupes, deputes, assemblee };
+  etat.amo = { leg, le: Date.now(), groupes, deputes, places, assemblee };
   log(`députés : ${Object.keys(deputes).length} en exercice, ${Object.keys(groupes).length} groupes`);
   return etat.amo;
+}
+
+/**
+ * Plan officiel de l'hémicycle : la page « hémicycle » du site dessine chaque siège (<path id="p89">).
+ * On en tire le centre de chaque siège. Rafraîchi une fois par semaine.
+ */
+async function chargerPlan(etat) {
+  if (etat.plan && Date.now() - etat.plan.le < 7 * 24 * H) return etat.plan;
+  const html = await get(`${AN}/dyn/vos-deputes/hemicycle`);
+  const centres = {};
+  for (const m of html.matchAll(/d="([^"]+)"\s*class="place"\s*id="p(\d+)"/g)) {
+    const jetons = m[1].match(/[MmLlHhVvCcZz]|-?\d*\.?\d+(?:e-?\d+)?/g);
+    let x = 0, y = 0, cmd = null, debut = true;
+    const pts = [];
+    for (let i = 0; i < jetons.length;) {
+      if (/[A-Za-z]/.test(jetons[i])) { cmd = jetons[i++]; if (/[Zz]/.test(cmd)) continue; }
+      const n = k => +jetons[i + k];
+      if (/[Mm]/.test(cmd)) { [x, y] = cmd === 'm' && !debut ? [x + n(0), y + n(1)] : [n(0), n(1)]; i += 2; cmd = cmd === 'm' ? 'l' : 'L'; }
+      else if (/[Ll]/.test(cmd)) { [x, y] = cmd === 'l' ? [x + n(0), y + n(1)] : [n(0), n(1)]; i += 2; }
+      else if (/[Hh]/.test(cmd)) { x = cmd === 'h' ? x + n(0) : n(0); i += 1; }
+      else if (/[Vv]/.test(cmd)) { y = cmd === 'v' ? y + n(0) : n(0); i += 1; }
+      else if (/[Cc]/.test(cmd)) { [x, y] = cmd === 'c' ? [x + n(4), y + n(5)] : [n(4), n(5)]; i += 6; }
+      else { i++; continue; }
+      debut = false;
+      pts.push([x, y]);
+    }
+    if (pts.length) centres[+m[2]] = [pts.reduce((a, p) => a + p[0], 0) / pts.length, pts.reduce((a, p) => a + p[1], 0) / pts.length];
+  }
+  if (Object.keys(centres).length < 500) throw new Error(`plan de l'hémicycle illisible (${Object.keys(centres).length} sièges)`);
+  etat.plan = { le: Date.now(), centres };
+  log(`plan de l'hémicycle : ${Object.keys(centres).length} sièges`);
+  return etat.plan;
+}
+
+/**
+ * Sièges réels des députés en exercice, pour le dessin du widget :
+ * [x, y, bloc, a voté] avec x, y ramenés sur une largeur de 1000. Bloc : g, s, r ou a.
+ */
+function hemicycleReel(amo, plan, votants) {
+  if (!plan || !votants) return null;
+  const pts = [];
+  for (const [uid, place] of Object.entries(amo.places ?? {})) {
+    const c = plan.centres[place];
+    const g = amo.groupes[amo.deputes[uid]];
+    if (c) pts.push([c[0], c[1], ({ gauche: 'g', socle: 's', rn: 'r' })[g?.bloc] ?? 'a', votants.has(uid) ? 1 : 0]);
+  }
+  if (pts.length < 500) return null;
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const x0 = Math.min(...xs), y0 = Math.min(...ys), k = 1000 / (Math.max(...xs) - x0);
+  return {
+    largeur: 1000, hauteur: Math.round((Math.max(...ys) - y0) * k),
+    sieges: pts.map(([x, y, b, v]) => [Math.round((x - x0) * k), Math.round((y - y0) * k), b, v]),
+  };
 }
 
 /** Sièges par bloc pour le demi-cercle (ordre gauche → droite de l'hémicycle). */
@@ -286,7 +343,7 @@ function lirePageScrutin(html, numero, leg) {
   const date = j ? `${j[4]}-${String(MOIS.indexOf(j[3].toLowerCase()) + 1).padStart(2, '0')}-${j[2].padStart(2, '0')}` : null;
 
   // ventilation par groupe : un <ul id="groupeXXX"> par groupe ; le dernier s'arrête à « Mises au point »
-  const groupes = [];
+  const groupes = [], votantsIds = [];
   const morceaux = html.split('<ul id="groupe').slice(1);
   morceaux.forEach((m, i) => {
     if (i === morceaux.length - 1) m = m.split(/Mises au point|Votes des groupes/)[0];
@@ -295,6 +352,12 @@ function lirePageScrutin(html, numero, leg) {
     const t = texteBrut('<x id="' + m);
     const n = re => { let s = 0; for (const x of t.matchAll(re)) s += +x[1]; return s; };
     const pour = n(/\bPour\s*:\s*(\d+)/g), contre = n(/\bContre\s*:\s*(\d+)/g), abst = n(/\bAbstentions?\s*:\s*(\d+)/g);
+    // liste nominative : chaque position (« Pour », « Contre »…) est suivie des députés (data-acteur-id="PA…")
+    for (const section of m.split('<span class="h6').slice(1)) {
+      const position = section.slice(section.indexOf('>') + 1, section.indexOf('<'));
+      if (/^(Pour|Contre|Abstention)/i.test(position.trim()))
+        for (const x of section.matchAll(/data-acteur-id="(PA\d+)/g)) votantsIds.push(x[1]);
+    }
     groupes.push({
       abrev, organe, membres: +(/\((\d+)(?: membres?)?\)/.exec(t)?.[1] ?? 0),
       pour, contre, abstention: abst, votants: pour + contre + abst, nonVotants: n(/Non votants?\s*:\s*(\d+)/g),
@@ -305,7 +368,7 @@ function lirePageScrutin(html, numero, leg) {
     votants: nb(/Nombre de votants\s*:\s*(\d+)/i), exprimes: nb(/suffrages exprimés\s*:\s*(\d+)/i),
     pour: nb(/Pour l.adoption\s*:\s*(\d+)/i), contre: nb(/Contre\s*:\s*(\d+)/i), abstention: nb(/Abstentions?\s*:\s*(\d+)/i),
     sort: /n.a pas adopté|a rejeté/i.test(txt) ? 'rejeté' : /a adopté/i.test(txt) ? 'adopté' : null,
-    groupes, delegationsConnues: false,
+    groupes, votantsIds, delegationsConnues: false,
   };
 }
 
@@ -318,7 +381,7 @@ async function scrutinsDepuisSite(leg, etat) {
   const res = [];
   for (const n of nums) {
     const cle = `${leg}-${n}`;
-    if (!etat.scrutins[cle]) {
+    if (!etat.scrutins[cle] || (res.length === 0 && !etat.scrutins[cle].votantsIds)) {
       const s = lirePageScrutin(await get(`${AN}/dyn/${leg}/scrutins/${n}`), n, leg);
       if (s.votants == null || !s.groupes.length) throw new Error(`scrutin ${n} : page illisible`);
       etat.scrutins[cle] = s;
@@ -336,10 +399,11 @@ async function scrutinsDepuisOpenData(leg, amo) {
   return derniers.map(({ e, n }) => {
     const s = zip.json(e).scrutin, d = s.syntheseVote.decompte;
     let presents = 0;
+    const votantsIds = [];
     const groupes = liste(s.ventilationVotes?.organe?.groupes?.groupe).map(g => {
       const v = g.vote.decompteVoix;
       for (const cat of ['pours', 'contres', 'abstentions'])
-        for (const x of liste(g.vote.decompteNominatif?.[cat]?.votant)) if (x.parDelegation === 'false') presents++;
+        for (const x of liste(g.vote.decompteNominatif?.[cat]?.votant)) { votantsIds.push(x.acteurRef); if (x.parDelegation === 'false') presents++; }
       return {
         abrev: amo.groupes[g.organeRef]?.abrev ?? g.organeRef, organe: g.organeRef, membres: +g.nombreMembresGroupe,
         pour: +v.pour, contre: +v.contre, abstention: +v.abstentions,
@@ -351,12 +415,12 @@ async function scrutinsDepuisOpenData(leg, amo) {
       seance: null, date: s.dateScrutin, votants: +s.syntheseVote.nombreVotants, exprimes: +s.syntheseVote.suffragesExprimes,
       pour: +d.pour, contre: +d.contre, abstention: +d.abstentions,
       sort: /adopt/i.test(s.sort.code) ? 'adopté' : 'rejeté', groupes,
-      delegationsConnues: true, presentsPhysiquement: presents,
+      votantsIds, delegationsConnues: true, presentsPhysiquement: presents,
     };
   });
 }
 
-async function construirePresence(leg, amo, etat) {
+async function construirePresence(leg, amo, plan, etat) {
   let scrutins, source = 'site';
   try {
     if (process.env.SIMULER_PANNE_SITE) throw new Error('panne simulée');   // pour tester le repli
@@ -383,6 +447,7 @@ async function construirePresence(leg, amo, etat) {
   return {
     schema: 1, genereLe: new Date().toISOString(), legislature: leg, source, sieges: SIEGES,
     siegesParBloc: siegesParBloc(amo),
+    hemicycle: hemicycleReel(amo, plan, d.votantsIds ? new Set(d.votantsIds) : null),
     avertissement: "L'Assemblée ne publie pas la présence en temps réel : il s'agit des votants du dernier scrutin public, délégations de vote comprises.",
     dernier: {
       numero: d.numero, url: d.url, titre: d.titre, titreCourt: d.titreCourt, seance: d.seance, date: d.date, vuA: d.vuA,
@@ -546,7 +611,8 @@ async function main() {
   if (!amo) throw new Error('aucune liste de députés disponible (premier passage ?)');
   const agenda = await etape('agenda', () => chargerAgenda(leg, etat, now)) ?? etat.agenda ?? { seances: [] };
 
-  const presence = await etape('presence', () => construirePresence(leg, amo, etat));
+  const plan = await etape('plan', () => chargerPlan(etat)) ?? etat.plan;
+  const presence = await etape('presence', () => construirePresence(leg, amo, plan, etat));
   if (presence) await ecrireJSON('presence.json', presence);
   if (agenda.seances.length) await ecrireJSON('feuille-verte.json', construireFeuilleVerte(leg, agenda));
   const eliasse = await etape('eliasse', () => construireEliasse(leg, amo, agenda, etat, now));
@@ -558,6 +624,10 @@ async function main() {
     for (const c of cles.slice(30)) delete etat[k][c];
   }
   etat.dernierPassage = now; etat.erreurs = erreurs;
+  // séance en cours (ou dans moins de 30 min) d'après l'agenda à jour : le planificateur boucle alors toutes les 5 min
+  const actif = fenetres(agenda.seances).some(f => Date.now() >= f.debut - 30 * MIN && Date.now() < f.fin + 30 * MIN);
+  etat.seanceActive = actif;
+  if (process.env.GITHUB_OUTPUT) await writeFile(process.env.GITHUB_OUTPUT, `actif=${actif ? 1 : 0}\n`, { flag: 'a' });
   await writeFile(FICHIER_ETAT(), JSON.stringify(etat));
   log(erreurs.length ? `terminé avec ${erreurs.length} erreur(s)` : 'terminé sans erreur');
   if (erreurs.length === 3) process.exitCode = 1;                    // tout est tombé : on le signale au planificateur

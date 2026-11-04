@@ -35,6 +35,7 @@ const COULEURS = {
 };
 // L'agenda est publié une fois par jour : au-delà de 26 h, il est jugé ancien
 const SEUIL_ANCIEN_MIN = 26 * 60;
+const TAILLE_APERCU = "large";
 
 // ==========================================================================
 // Outils communs
@@ -83,7 +84,7 @@ function pastille(pile, libelle, fond, encre, taille = 9) {
 }
 
 /** En-tête : icône calendrier, « FEUILLE VERTE », pastille Aujourd'hui/Demain, heure de mise à jour. */
-function entete(pile, quand, d, horsLigne) {
+function entete(pile, quand, d, horsLigne, taille) {
   const l = pile.addStack();
   l.layoutHorizontally();
   l.centerAlignContent();
@@ -98,9 +99,33 @@ function entete(pile, quand, d, horsLigne) {
   pastille(l, quand.toUpperCase(), COULEURS.carte, COULEURS.secondaire, 8.5);
   l.addSpacer();
   const ancien = horsLigne || (Date.now() - Date.parse(d.agendaDu || d.genereLe)) / 60000 > SEUIL_ANCIEN_MIN;
-  texte(l, ancien ? `données de ${hm(d.genereLe)}` : `màj ${hm(d.genereLe)}`, 9.5,
-    { poids: ancien ? "semi" : "medium", couleur: ancien ? COULEURS.alerte : COULEURS.secondaire });
+  boutonActualiser(l, ancien ? `données de ${hm(d.genereLe)}` : `màj ${hm(d.genereLe)}`, ancien ? COULEURS.alerte : COULEURS.secondaire, taille);
 }
+
+/**
+ * Bouton « actualiser » : ouvre Scriptable, relance ce script et affiche aussitôt les données fraîches.
+ * (iOS n'autorise pas un vrai bouton qui recharge le widget sans ouvrir d'application.)
+ * Disponible en tailles moyenne et grande : sur un petit widget, iOS n'accepte qu'un seul lien.
+ */
+const URL_ACTUALISER = taille => `scriptable:///run/${encodeURIComponent(Script.name())}?taille=${taille}`;
+function boutonActualiser(pile, libelle, couleur, taille) {
+  const b = pile.addStack();
+  b.layoutHorizontally();
+  b.centerAlignContent();
+  b.backgroundColor = COULEURS.carte;
+  b.cornerRadius = 7;
+  b.setPadding(2, 6, 2, 6);
+  b.url = URL_ACTUALISER(taille);
+  const sym = SFSymbol.named("arrow.clockwise");
+  sym.applyFont(Font.boldSystemFont(9));
+  const img = b.addImage(sym.image);
+  img.imageSize = new Size(9, 9);
+  img.tintColor = couleur;
+  b.addSpacer(3);
+  texte(b, libelle, 9.5, { poids: "semi", couleur });
+}
+
+
 
 function widgetErreur(message) {
   const w = new ListWidget();
@@ -200,7 +225,7 @@ function construire(d, horsLigne, grand) {
   w.url = d.urlFeuilleVerte;
   const { iso, quand, jour, prochain } = jourAffiche(d);
 
-  entete(w, quand, d, horsLigne);
+  entete(w, quand, d, horsLigne, grand ? "large" : "medium");
   w.addSpacer(4);
   texte(w, jour ? capitale(jour.libelle) : dateEnLettres(iso), grand ? 21 : 18, { poids: "lourd" });
   w.addSpacer(grand ? 9 : 6);
@@ -249,5 +274,11 @@ const widget = !d ? widgetErreur("Vérifiez la connexion. Le widget réessaiera 
 widget.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000);
 
 if (config.runsInWidget) Script.setWidget(widget);
-else await widget.presentLarge();
+else {
+  // lancé depuis l'app ou par le bouton « actualiser » : aperçu à la taille du widget
+  const t = (args.queryParameters || {}).taille || TAILLE_APERCU;
+  if (t === "small") await widget.presentSmall();
+  else if (t === "large") await widget.presentLarge();
+  else await widget.presentMedium();
+}
 Script.complete();

@@ -35,6 +35,7 @@ const COULEURS = {
   rn:         dyn("#2154C4", "#6D9BF1"),
   autres:     dyn("#8E8E93", "#A1A1A6"),
 };
+const TAILLE_APERCU = "medium";
 const SEUIL_ANCIEN_MIN = 15;     // en séance, une donnée de plus de 15 min est signalée en orange
 
 // ==========================================================================
@@ -114,10 +115,34 @@ function entete(pile, titre, etat, d, horsLigne, avecHeure = true) {
   l.addSpacer();
   if (avecHeure) {
     const ancien = estAncien(d, horsLigne);
-    texte(l, ancien ? `données de ${hm(d.genereLe)}` : `màj ${hm(d.genereLe)}`, 9.5,
-      { poids: ancien ? "semi" : "medium", couleur: ancien ? COULEURS.alerte : COULEURS.secondaire });
+    boutonActualiser(l, ancien ? `données de ${hm(d.genereLe)}` : `màj ${hm(d.genereLe)}`, ancien ? COULEURS.alerte : COULEURS.secondaire, "medium");
   }
 }
+
+/**
+ * Bouton « actualiser » : ouvre Scriptable, relance ce script et affiche aussitôt les données fraîches.
+ * (iOS n'autorise pas un vrai bouton qui recharge le widget sans ouvrir d'application.)
+ * Disponible en tailles moyenne et grande : sur un petit widget, iOS n'accepte qu'un seul lien.
+ */
+const URL_ACTUALISER = taille => `scriptable:///run/${encodeURIComponent(Script.name())}?taille=${taille}`;
+function boutonActualiser(pile, libelle, couleur, taille) {
+  const b = pile.addStack();
+  b.layoutHorizontally();
+  b.centerAlignContent();
+  b.backgroundColor = COULEURS.carte;
+  b.cornerRadius = 7;
+  b.setPadding(2, 6, 2, 6);
+  b.url = URL_ACTUALISER(taille);
+  const sym = SFSymbol.named("arrow.clockwise");
+  sym.applyFont(Font.boldSystemFont(9));
+  const img = b.addImage(sym.image);
+  img.imageSize = new Size(9, 9);
+  img.tintColor = couleur;
+  b.addSpacer(3);
+  texte(b, libelle, 9.5, { poids: "semi", couleur });
+}
+
+
 
 /** Heure de mise à jour seule (petit format, en bas). */
 function heureMaj(pile, d, horsLigne) {
@@ -269,6 +294,8 @@ function construireMoyen(d, horsLigne) {
 
 function construirePetit(d, horsLigne) {
   const w = nouveauWidget(d, [11, 12, 10, 12]);
+  // petit widget : un seul lien possible. Paramètre « actualiser » → le toucher actualise au lieu d'ouvrir eLiasse
+  if ((args.widgetParameter || "").toLowerCase().includes("actualiser")) w.url = URL_ACTUALISER("small");
   const { etat, reprise: rep } = etatSeance(d, horsLigne);
   entete(w, null, etat, d, horsLigne, false);
   w.addSpacer(6);
@@ -362,5 +389,11 @@ else widget = construireMoyen(d, horsLigne);
 widget.refreshAfterDate = new Date(Date.now() + 5 * 60 * 1000);
 
 if (config.runsInWidget) Script.setWidget(widget);
-else await widget.presentMedium();
+else {
+  // lancé depuis l'app ou par le bouton « actualiser » : aperçu à la taille du widget
+  const t = (args.queryParameters || {}).taille || TAILLE_APERCU;
+  if (t === "small") await widget.presentSmall();
+  else if (t === "large") await widget.presentLarge();
+  else await widget.presentMedium();
+}
 Script.complete();

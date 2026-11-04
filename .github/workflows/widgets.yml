@@ -1,22 +1,22 @@
 # Génère presence.json, feuille-verte.json et eliasse.json et les publie sur la branche « donnees ».
-# Le planificateur appelle le script toutes les 5 minutes ; hors séance, le script ne travaille
-# qu'une fois par heure (il sort aussitôt les autres fois).
+#
+# Pourquoi une boucle ? Les tâches planifiées de GitHub ne partent pas à l'heure (retards de
+# 5 à 15 min, passages parfois sautés). On déclenche donc un passage toutes les 30 min ; pendant
+# une séance, ce passage reste actif ~28 min et régénère les données lui-même toutes les 5 min.
+# Hors séance, il fait un seul passage rapide (le script ne travaille qu'une fois par heure).
 #
 # Les widgets lisent ensuite :
 #   https://raw.githubusercontent.com/<compte>/<depot>/donnees/presence.json   (idem pour les 2 autres)
-#
-# Attention : GitHub ne garantit pas l'heure exacte des tâches planifiées (retards de 5 à 15 min
-# possibles aux heures chargées). Pour une cadence stricte, utiliser le cron de Perchoir Radar (voir README).
 name: Widgets séance
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch: {}          # bouton « Run workflow » pour forcer un passage
 
 concurrency:
   group: widgets-seance
-  cancel-in-progress: false
+  cancel-in-progress: false      # un passage en attente démarre dès que le précédent se termine
 
 permissions:
   contents: write
@@ -24,7 +24,7 @@ permissions:
 jobs:
   generer:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
@@ -38,19 +38,36 @@ jobs:
           if git fetch -q --depth=1 origin donnees; then
             git archive FETCH_HEAD | tar -x -C public
           fi
-          cat public/*.json 2>/dev/null | sha1sum > /tmp/avant.sha
 
-      - name: Générer les JSON
-        run: node serveur/build.mjs --out public ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
-
-      - name: Publier sur la branche « donnees » (un seul commit, écrasé à chaque fois)
+      - name: Générer et publier (toutes les 5 min tant qu'une séance est en cours)
+        env:
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
+          DEPOT: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         run: |
-          cat public/*.json 2>/dev/null | sha1sum > /tmp/apres.sha
-          if cmp -s /tmp/avant.sha /tmp/apres.sha; then echo "Aucun changement."; exit 0; fi
-          cd public
-          git init -q -b donnees
-          git config user.name  "widgets-seance"
-          git config user.email "widgets-seance@users.noreply.github.com"
-          git add -A
-          git commit -q -m "Données du $(date -u +'%Y-%m-%d %H:%M') UTC"
-          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" donnees
+          publier() {
+            # un seul commit, écrasé à chaque fois : la branche reste légère
+            rm -rf /tmp/pub && cp -r public /tmp/pub && cd /tmp/pub
+            git init -q -b donnees
+            git config user.name  "widgets-seance"
+            git config user.email "widgets-seance@users.noreply.github.com"
+            git add -A
+            git commit -q -m "Données du $(date -u +'%Y-%m-%d %H:%M') UTC"
+            git push -q -f "$DEPOT" donnees
+            cd - > /dev/null
+          }
+          debut=$(date +%s)
+          tour=0
+          while :; do
+            avant=$(cat public/*.json 2>/dev/null | sha1sum)
+            rm -f /tmp/sortie && GITHUB_OUTPUT=/tmp/sortie node serveur/build.mjs --out public $FORCE || true
+            FORCE=""
+            apres=$(cat public/*.json 2>/dev/null | sha1sum)
+            if [ "$avant" != "$apres" ]; then publier; echo "Publié."; else echo "Aucun changement."; fi
+            tour=$((tour + 1))
+            # on continue seulement si une séance est en cours et qu'il reste du temps avant le passage suivant
+            grep -q "actif=1" /tmp/sortie 2>/dev/null || break
+            ecoule=$(( $(date +%s) - debut ))
+            [ $ecoule -lt $((25 * 60)) ] || break
+            sleep $(( 300 - ( $(date +%s) - debut ) % 300 ))
+          done
+          echo "$tour passage(s) effectué(s)."
