@@ -89,13 +89,14 @@ Sur l'écran verrouillé, le widget affiche trois lignes : le texte et l'article
 
 ## Comment lire les widgets
 
-**En bas de chaque widget, l'heure de mise à jour :**
+**En haut à droite de chaque widget, l'heure de mise à jour :**
 - `màj 14h40` en gris : les données sont récentes.
 - `données de 13h38` en **orange** : le téléphone n'a pas pu récupérer de nouvelles données (réseau coupé, ou panne côté Assemblée). Le widget montre la dernière information connue, avec son heure.
 
 **Widget 1 – Présence**
 - Le grand chiffre est le nombre de députés qui ont voté au dernier scrutin public, sur 577 sièges.
-- Le demi-cercle représente l'hémicycle : les points colorés sont les votants, les points pâles les autres sièges.
+- Le demi-cercle est le **vrai plan de l'hémicycle** : chaque point est le siège réel d'un député. Couleur vive : il a voté. Couleur pâle : il n'a pas voté.
+- La carte de droite détaille les 12 groupes : votants / effectif du groupe (par exemple `SOC 16 / 68`).
 - Les 4 chiffres colorés donnent la répartition par bloc : **Gauche** (rouge), **Socle commun** (jaune), **RN-UDR** (bleu) et **Autres** (gris).
 - **Important :** l'Assemblée ne publie pas de présence en temps réel. Le chiffre vient du **dernier scrutin public**
   (« d'après le scrutin de 14h32 »), et un député peut voter pour un collègue absent (délégation).
@@ -111,11 +112,25 @@ Sur l'écran verrouillé, le widget affiche trois lignes : le texte et l'article
 - Hors séance, il affiche par exemple « Séance levée · reprise à 15h00 ».
 - Les avis de la commission et du Gouvernement ne sont plus publiés par eLiasse : ils ne s'affichent donc pas.
 
+## Actualiser un widget à la demande
+
+En taille **moyenne** et **grande**, l'heure en haut à droite (« màj 14h40 ») est un **bouton** :
+
+1. Touchez-le.
+2. Scriptable s'ouvre et affiche aussitôt le widget avec les dernières données.
+3. Revenez à l'écran d'accueil : le widget se met en général à jour dans la foulée.
+
+Partout ailleurs, toucher le widget ouvre la page du scrutin, la feuille verte ou eLiasse, comme avant.
+
+Sur un **petit** widget, iOS n'autorise qu'une seule action au toucher. Pour qu'il actualise au lieu d'ouvrir le site :
+1. Appuyez longuement sur le widget, puis **Modifier le widget**.
+2. Dans **Parameter**, écrivez `actualiser`.
+
 ## Questions fréquentes
 
 **Le widget ne change pas toutes les 5 minutes.**
-C'est l'iPhone qui décide quand rafraîchir les widgets, en général toutes les 15 à 30 minutes. Pour forcer une mise à jour,
-ouvrez Scriptable et touchez la tuile du script, ou regardez l'heure en bas du widget.
+Pendant les séances, les données sont bien produites toutes les 5 minutes. Mais c'est l'iPhone qui décide quand il redessine
+un widget, en général toutes les 15 à 30 minutes. Pour avoir les données tout de suite, touchez le bouton « màj » en haut à droite.
 
 **Le widget affiche « Select script in widget configurator ».**
 L'étape 4 (points 7 à 9) n'a pas été terminée : appuyez longuement sur le widget, puis **Modifier le widget**, puis choisissez le script.
