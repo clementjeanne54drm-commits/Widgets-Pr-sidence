@@ -8,7 +8,7 @@
 
    Ce que montre le widget :
    - le texte en discussion, l'article en cours, le numéro du prochain amendement,
-     son auteur et son groupe, le nombre d'amendements restants ;
+     son auteur et son groupe (pastille colorée), le nombre d'amendements restants ;
    - les avis commission / Gouvernement s'ils sont publiés (la nouvelle eLiasse ne les diffuse plus :
      la ligne n'apparaît alors pas) ;
    - hors séance : « Séance levée · reprise à 15h00 ».
@@ -19,23 +19,26 @@
 // ---------- RÉGLAGE : adresse des données ----------
 const URL_DONNEES = "https://raw.githubusercontent.com/clementjeanne54drm-commits/Widgets-Pr-sidence/donnees/eliasse.json";
 
-// ---------- Apparence ----------
+// ==========================================================================
+// Apparence (identique dans les 3 widgets)
+// ==========================================================================
 const dyn = (clair, sombre) => Color.dynamic(new Color(clair), new Color(sombre));
 const COULEURS = {
   fond:       dyn("#FFFFFF", "#1C1C1E"),
+  carte:      dyn("#F2F2F7", "#2C2C2E"),
   texte:      dyn("#1C1C1E", "#F2F2F7"),
-  secondaire: dyn("#6E6E73", "#AEAEB2"),
+  secondaire: dyn("#8A8A8E", "#98989D"),
   alerte:     dyn("#C25E00", "#FF9F0A"),
-  piste:      dyn("#E5E5EA", "#3A3A3C"),
-  gauche:     dyn("#D62828", "#FF5A5F"),
+  vert:       dyn("#248A3D", "#30D158"),
+  gauche:     dyn("#E03A3E", "#FF6B6B"),
   socle:      dyn("#C99700", "#FFD23F"),
-  rn:         dyn("#1D4E9E", "#6D9BF1"),
-  autres:     dyn("#8E8E93", "#98989D"),
+  rn:         dyn("#2154C4", "#6D9BF1"),
+  autres:     dyn("#8E8E93", "#A1A1A6"),
 };
 const SEUIL_ANCIEN_MIN = 15;     // en séance, une donnée de plus de 15 min est signalée en orange
 
 // ==========================================================================
-// Outils communs (identiques dans les 3 widgets)
+// Outils communs
 // ==========================================================================
 const pad = n => String(n).padStart(2, "0");
 const hm = iso => { const d = new Date(iso); return `${d.getHours()}h${pad(d.getMinutes())}`; };
@@ -62,24 +65,65 @@ async function chargerDonnees(url, nomCache) {
 function texte(pile, contenu, taille, { gras = false, couleur = COULEURS.texte, lignes = 1, poids } = {}) {
   const t = pile.addText(String(contenu));
   t.font = poids === "semi" ? Font.semiboldSystemFont(taille) : poids === "medium" ? Font.mediumSystemFont(taille)
-    : gras ? Font.boldSystemFont(taille) : Font.systemFont(taille);
+    : poids === "lourd" ? Font.heavySystemFont(taille) : gras ? Font.boldSystemFont(taille) : Font.systemFont(taille);
   t.textColor = couleur;
   t.lineLimit = lignes;
   t.minimumScaleFactor = 0.6;
   return t;
 }
 
+function carte(pile, { padding = [8, 10, 8, 10] } = {}) {
+  const c = pile.addStack();
+  c.backgroundColor = COULEURS.carte;
+  c.cornerRadius = 12;
+  c.setPadding(...padding);
+  c.layoutVertically();
+  return c;
+}
+
+function pastille(pile, libelle, fond, encre = new Color("#FFFFFF"), taille = 9) {
+  const p = pile.addStack();
+  p.backgroundColor = fond;
+  p.cornerRadius = 5;
+  p.setPadding(1.5, 5, 1.5, 5);
+  texte(p, libelle, taille, { gras: true, couleur: encre });
+  return p;
+}
+
+/** Pastille de groupe aux couleurs du bloc (texte foncé sur le jaune, blanc sinon). */
+const pastilleGroupe = (pile, p, taille = 10) =>
+  pastille(pile, p.groupe, COULEURS[p.bloc] || COULEURS.autres, p.bloc === "socle" ? new Color("#1C1C1E") : new Color("#FFFFFF"), taille);
+
 const estAncien = (d, horsLigne) => horsLigne || (Date.now() - Date.parse(d.genereLe)) / 60000 > SEUIL_ANCIEN_MIN;
 
-function piedDePage(pile, d, horsLigne, gauche) {
-  const ligne = pile.addStack();
-  ligne.layoutHorizontally();
-  ligne.centerAlignContent();
-  if (gauche) texte(ligne, gauche, 8.5, { couleur: COULEURS.secondaire });
-  ligne.addSpacer();
+/** En-tête : icône + titre, puis à droite la pastille d'état et l'heure de mise à jour. */
+function entete(pile, titre, etat, d, horsLigne, avecHeure = true) {
+  const l = pile.addStack();
+  l.layoutHorizontally();
+  l.centerAlignContent();
+  const sym = SFSymbol.named("doc.text.fill");
+  sym.applyFont(Font.boldSystemFont(10));
+  const img = l.addImage(sym.image);
+  img.imageSize = new Size(11, 11);
+  img.tintColor = COULEURS.secondaire;
+  l.addSpacer(4);
+  if (titre) { texte(l, titre, 10, { gras: true, couleur: COULEURS.secondaire }); l.addSpacer(6); }
+  if (etat === "seance") pastille(l, "EN SÉANCE", COULEURS.vert, new Color("#FFFFFF"), 8.5);
+  else if (etat === "qag") pastille(l, "QAG", COULEURS.vert, new Color("#FFFFFF"), 8.5);
+  else pastille(l, "SÉANCE LEVÉE", COULEURS.secondaire, new Color("#FFFFFF"), 8.5);
+  l.addSpacer();
+  if (avecHeure) {
+    const ancien = estAncien(d, horsLigne);
+    texte(l, ancien ? `données de ${hm(d.genereLe)}` : `màj ${hm(d.genereLe)}`, 9.5,
+      { poids: ancien ? "semi" : "medium", couleur: ancien ? COULEURS.alerte : COULEURS.secondaire });
+  }
+}
+
+/** Heure de mise à jour seule (petit format, en bas). */
+function heureMaj(pile, d, horsLigne) {
   const ancien = estAncien(d, horsLigne);
-  texte(ligne, ancien ? `données de ${hm(d.genereLe)}` : `màj ${hm(d.genereLe)}`, 9,
-    { couleur: ancien ? COULEURS.alerte : COULEURS.secondaire, poids: ancien ? "semi" : undefined });
+  texte(pile, ancien ? `données de ${hm(d.genereLe)}` : `màj ${hm(d.genereLe)}`, 9,
+    { poids: ancien ? "semi" : "medium", couleur: ancien ? COULEURS.alerte : COULEURS.secondaire });
 }
 
 function widgetErreur(message) {
@@ -102,150 +146,166 @@ function etatSeance(d, horsLigne) {
   return { etat: dansFenetre ? "seance" : "levee", reprise: suivante ? suivante.debut : null };
 }
 
-/** « à 15h00 », « demain à 9h00 », « jeudi 5 nov. à 9h00 » */
-function quandReprise(iso) {
+/** Moment de la reprise : { jour: "" | "demain" | "jeudi 5 nov.", heure: "15h00" } */
+function reprise(iso) {
   if (!iso) return null;
   const r = new Date(iso), auj = new Date();
   const demain = new Date(auj); demain.setDate(auj.getDate() + 1);
   const meme = (a, b) => a.toDateString() === b.toDateString();
-  if (meme(r, auj)) return `à ${hm(iso)}`;
-  if (meme(r, demain)) return `demain à ${hm(iso)}`;
-  return `${JOURS[r.getDay()]} ${r.getDate()} ${MOIS_COURTS[r.getMonth()]} à ${hm(iso)}`;
+  const jour = meme(r, auj) ? "" : meme(r, demain) ? "demain" : `${JOURS[r.getDay()]} ${r.getDate()} ${MOIS_COURTS[r.getMonth()]}`;
+  return { jour, heure: hm(iso) };
 }
+const repriseEnClair = iso => { const r = reprise(iso); return r ? `${r.jour ? r.jour + " " : ""}à ${r.heure}` : "à préciser"; };
 
-/** Barre de progression (amendements examinés / total) */
-function barre(examines, total, largeur) {
+/** Barre de progression (amendements examinés / total), en vert. */
+function barre(examines, total, largeur, hauteur = 5) {
   const ctx = new DrawContext();
-  ctx.size = new Size(largeur, 4);
+  ctx.size = new Size(largeur, hauteur);
   ctx.opaque = false;
   ctx.respectScreenScale = true;
   ctx.setFillColor(new Color("#8E8E93", 0.3));
-  const fond = new Path(); fond.addRoundedRect(new Rect(0, 0, largeur, 4), 2, 2); ctx.addPath(fond); ctx.fillPath();
-  ctx.setFillColor(new Color("#8E8E93"));
-  const plein = new Path(); plein.addRoundedRect(new Rect(0, 0, Math.max(4, largeur * examines / Math.max(1, total)), 4), 2, 2);
+  const fond = new Path(); fond.addRoundedRect(new Rect(0, 0, largeur, hauteur), hauteur / 2, hauteur / 2); ctx.addPath(fond); ctx.fillPath();
+  ctx.setFillColor(new Color("#34C759"));
+  const plein = new Path(); plein.addRoundedRect(new Rect(0, 0, Math.max(hauteur, largeur * examines / Math.max(1, total)), hauteur), hauteur / 2, hauteur / 2);
   ctx.addPath(plein); ctx.fillPath();
   return ctx.getImage();
 }
 
 // ==========================================================================
-// Écran d'accueil : petite et moyenne tailles
+// Briques d'affichage
 // ==========================================================================
-function entete(pile, libelle, droite) {
+/** « PLF 2027 · 1re partie » en gras, « Article 42 » en gris. */
+function ligneTexte(pile, d, taille) {
   const l = pile.addStack();
   l.layoutHorizontally();
-  texte(l, libelle, 9.5, { gras: true, couleur: COULEURS.secondaire });
-  l.addSpacer();
-  if (droite) texte(l, droite, 9.5, { poids: "semi", couleur: COULEURS.secondaire });
+  l.bottomAlignContent();
+  texte(l, d.texte ? d.texte.court : "Texte en discussion", taille, { gras: true });
+  if (d.article) { l.addSpacer(6); texte(l, d.article, taille - 1, { poids: "medium", couleur: COULEURS.secondaire }); }
 }
 
-function blocAmendement(pile, d, grand) {
+/** Le prochain amendement : numéro en très grand, auteur et pastille du groupe. */
+function blocAmendement(pile, d, tailleNumero) {
   const p = d.prochain;
-  texte(pile, d.texte ? d.texte.court : "Texte en discussion", grand ? 13 : 12, { poids: "semi" });
-  texte(pile, d.article || "", grand ? 12 : 11, { couleur: COULEURS.secondaire });
-  pile.addSpacer(grand ? 5 : 3);
   if (!p) { texte(pile, "Pas d'amendement en attente", 13, { gras: true, lignes: 2 }); return; }
-  const n = pile.addStack();
-  n.layoutHorizontally();
-  n.bottomAlignContent();
-  texte(n, "n°", 11, { couleur: COULEURS.secondaire, poids: "medium" });
-  n.addSpacer(3);
-  texte(n, p.numero, grand ? 34 : 28, { gras: true });
-  pile.addSpacer(1);
+  texte(pile, "PROCHAIN AMENDEMENT", 8.5, { gras: true, couleur: COULEURS.secondaire });
+  texte(pile, p.numero, tailleNumero, { poids: "lourd" });
   const a = pile.addStack();
   a.layoutHorizontally();
   a.centerAlignContent();
-  texte(a, p.auteur || "", 11.5, { poids: "medium" });
-  if (p.groupe) { a.addSpacer(6); pastille(a, p.groupe, p.bloc); }
+  texte(a, p.auteur || "", 11, { poids: "medium" });
+  if (p.groupe) { a.addSpacer(5); pastilleGroupe(a, p, 9.5); }
+  if (p.avisCommission || p.avisGouvernement) {
+    pile.addSpacer(3);
+    if (p.avisCommission) texte(pile, `Commission : ${p.avisCommission}`, 9.5, { poids: "medium" });
+    if (p.avisGouvernement) texte(pile, `Gouvernement : ${p.avisGouvernement}`, 9.5, { poids: "medium" });
+  }
 }
 
-/** Petite pastille arrondie aux couleurs du bloc (texte foncé sur le jaune, blanc sinon). */
-function pastille(pile, libelle, bloc) {
-  const b = pile.addStack();
-  b.backgroundColor = COULEURS[bloc] || COULEURS.autres;
-  b.cornerRadius = 4;
-  b.setPadding(1, 5, 1, 5);
-  texte(b, libelle, 10, { gras: true, couleur: bloc === "socle" ? new Color("#1C1C1E") : new Color("#FFFFFF") });
+/** Carte « amendements restants » avec barre de progression. */
+function carteRestants(pile, d, largeur) {
+  const c = carte(pile, { padding: [8, 10, 8, 10] });
+  c.size = new Size(largeur, 0);
+  texte(c, "RESTANTS", 8.5, { gras: true, couleur: COULEURS.secondaire });
+  texte(c, d.restants != null ? milliers(d.restants) : "--", 26, { poids: "lourd" });
+  if (d.total) {
+    c.addSpacer(3);
+    const img = c.addImage(barre(d.examines || 0, d.total, largeur - 20));
+    img.imageSize = new Size(largeur - 20, 5);
+    c.addSpacer(3);
+    texte(c, `${milliers(d.examines)} / ${milliers(d.total)} examinés`, 8.5, { couleur: COULEURS.secondaire });
+  }
+  const p = d.prochain;
+  if (p && p.suivants && p.suivants.length) { c.addSpacer(2); texte(c, `Puis ${p.suivants.join(", ")}`, 8.5, { couleur: COULEURS.secondaire }); }
+  c.addSpacer();
 }
 
-function construirePetit(d, horsLigne) {
+// ==========================================================================
+// Écran d'accueil
+// ==========================================================================
+function nouveauWidget(d, padding) {
   const w = new ListWidget();
   w.backgroundColor = COULEURS.fond;
-  w.setPadding(11, 12, 8, 12);
+  w.setPadding(...padding);
   w.url = d.urlEliasse;
-  const { etat, reprise } = etatSeance(d, horsLigne);
-  if (etat === "levee" || etat === "qag") {
-    entete(w, etat === "qag" ? "EN SÉANCE" : "SÉANCE LEVÉE");
-    w.addSpacer(5);
-    if (etat === "qag") texte(w, "Questions au Gouvernement", 17, { gras: true, lignes: 2 });
-    else { texte(w, "Reprise", 12, { couleur: COULEURS.secondaire }); texte(w, (quandReprise(reprise) || "à préciser").replace(/^à /, ""), 20, { gras: true, lignes: 2 }); }
-    w.addSpacer();
-    if (d.texte) texte(w, d.texte.court, 11, { poids: "semi" });
-    if (d.restants != null) texte(w, `${milliers(d.restants)} amendements restants`, 10, { couleur: COULEURS.secondaire });
-  } else {
-    entete(w, "EN SÉANCE", d.restants != null ? `${milliers(d.restants)} rest.` : null);
-    w.addSpacer(4);
-    blocAmendement(w, d, false);
-    w.addSpacer();
-  }
-  w.addSpacer(2);
-  piedDePage(w, d, horsLigne);
   return w;
 }
 
 function construireMoyen(d, horsLigne) {
-  const w = new ListWidget();
-  w.backgroundColor = COULEURS.fond;
-  w.setPadding(12, 14, 9, 14);
-  w.url = d.urlEliasse;
-  const { etat, reprise } = etatSeance(d, horsLigne);
+  const w = nouveauWidget(d, [11, 13, 11, 13]);
+  const { etat, reprise: rep } = etatSeance(d, horsLigne);
+  entete(w, "ELIASSE", etat, d, horsLigne);
+  w.addSpacer(6);
 
-  if (etat === "levee") {
-    entete(w, "ELIASSE · SÉANCE LEVÉE");
-    w.addSpacer(6);
-    texte(w, `Séance levée · reprise ${quandReprise(reprise) || "à préciser"}`, 18, { gras: true, lignes: 2 });
-    w.addSpacer(6);
-    if (d.texte) texte(w, `Dernier texte : ${d.texte.court}`, 12, { poids: "semi" });
-    if (d.article && d.prochain) texte(w, `Reprendra : ${d.article}, amendement n° ${d.prochain.numero}`, 11, { couleur: COULEURS.secondaire });
-    if (d.restants != null) texte(w, `${milliers(d.restants)} amendements restants`, 11, { couleur: COULEURS.secondaire });
-    w.addSpacer();
-    piedDePage(w, d, horsLigne);
-    return w;
-  }
-
-  entete(w, etat === "qag" ? "ELIASSE · QUESTIONS AU GOUVERNEMENT" : "ELIASSE · EN SÉANCE");
-  w.addSpacer(4);
   const corps = w.addStack();
   corps.layoutHorizontally();
   const g = corps.addStack();
   g.layoutVertically();
-  blocAmendement(g, d, true);
-  corps.addSpacer();
 
-  const dr = corps.addStack();
-  dr.layoutVertically();
-  dr.size = new Size(118, 0);
-  if (d.restants != null) {
-    texte(dr, milliers(d.restants), 24, { gras: true });
-    texte(dr, "amendements restants", 10, { couleur: COULEURS.secondaire });
-    if (d.total) {
-      dr.addSpacer(3);
-      const img = dr.addImage(barre(d.examines || 0, d.total, 118));
-      img.imageSize = new Size(118, 4);
-      texte(dr, `${milliers(d.examines)} examinés sur ${milliers(d.total)}`, 9, { couleur: COULEURS.secondaire });
+  if (etat === "levee") {
+    const r = reprise(rep);
+    texte(g, r && r.jour ? `Reprise ${r.jour}` : "Reprise", 11, { poids: "semi", couleur: COULEURS.secondaire });
+    texte(g, r ? r.heure : "--", 38, { poids: "lourd" });
+    g.addSpacer(2);
+    ligneTexte(g, d, 12);
+    if (d.prochain) texte(g, `Reprendra au n° ${d.prochain.numero}`, 10, { couleur: COULEURS.secondaire });
+  } else if (etat === "qag") {
+    texte(g, "Questions", 22, { poids: "lourd" });
+    texte(g, "au Gouvernement", 22, { poids: "lourd" });
+    g.addSpacer(4);
+    texte(g, d.texte ? `Ensuite : ${d.texte.court}` : "", 11, { couleur: COULEURS.secondaire });
+  } else {
+    ligneTexte(g, d, 12.5);
+    g.addSpacer(4);
+    blocAmendement(g, d, 32);
+  }
+  g.addSpacer();
+  corps.addSpacer();               // pousse la carte « restants » contre le bord droit
+  carteRestants(corps, d, 112);
+
+  w.addSpacer(4);
+  texte(w, "Avis commission / Gouvernement non publiés par eLiasse", 8, { couleur: COULEURS.secondaire });
+  return w;
+}
+
+function construirePetit(d, horsLigne) {
+  const w = nouveauWidget(d, [11, 12, 10, 12]);
+  const { etat, reprise: rep } = etatSeance(d, horsLigne);
+  entete(w, null, etat, d, horsLigne, false);
+  w.addSpacer(6);
+  if (etat === "levee") {
+    const r = reprise(rep);
+    texte(w, r && r.jour ? `Reprise ${r.jour}` : "Reprise", 11, { poids: "semi", couleur: COULEURS.secondaire });
+    texte(w, r ? r.heure : "--", 34, { poids: "lourd" });
+    w.addSpacer();
+    texte(w, d.texte ? d.texte.court : "", 11, { gras: true });
+    if (d.restants != null) texte(w, `${milliers(d.restants)} amendements restants`, 9.5, { couleur: COULEURS.secondaire });
+  } else if (etat === "qag") {
+    texte(w, "Questions au Gouvernement", 18, { poids: "lourd", lignes: 3 });
+    w.addSpacer();
+    texte(w, d.texte ? `Ensuite : ${d.texte.court}` : "", 10, { couleur: COULEURS.secondaire });
+  } else {
+    texte(w, d.texte ? d.texte.court : "", 11, { gras: true });
+    texte(w, d.article || "", 10, { poids: "medium", couleur: COULEURS.secondaire });
+    w.addSpacer(2);
+    const p = d.prochain;
+    texte(w, p ? p.numero : "--", 30, { poids: "lourd" });
+    if (p) {
+      const a = w.addStack();
+      a.layoutHorizontally();
+      a.centerAlignContent();
+      texte(a, p.auteur || "", 10.5, { poids: "medium" });
+      if (p.groupe) { a.addSpacer(4); pastilleGroupe(a, p, 9); }
     }
+    w.addSpacer();
+    if (d.total) {
+      const img = w.addImage(barre(d.examines || 0, d.total, 134, 4));
+      img.imageSize = new Size(134, 4);
+      w.addSpacer(3);
+    }
+    if (d.restants != null) texte(w, `${milliers(d.restants)} restants`, 9.5, { poids: "semi", couleur: COULEURS.secondaire });
   }
-  const p = d.prochain;
-  if (p && (p.avisCommission || p.avisGouvernement)) {
-    dr.addSpacer(4);
-    if (p.avisCommission) texte(dr, `Commission : ${p.avisCommission}`, 10, { poids: "medium" });
-    if (p.avisGouvernement) texte(dr, `Gouvernement : ${p.avisGouvernement}`, 10, { poids: "medium" });
-  } else if (p && p.suivants && p.suivants.length) {
-    dr.addSpacer(4);
-    texte(dr, `Puis : ${p.suivants.join(", ")}`, 10, { couleur: COULEURS.secondaire });
-  }
-  dr.addSpacer();
-  w.addSpacer();
-  piedDePage(w, d, horsLigne, "Avis commission / Gouvernement non publiés par eLiasse");
+  w.addSpacer(2);
+  heureMaj(w, d, horsLigne);
   return w;
 }
 
@@ -255,18 +315,18 @@ function construireMoyen(d, horsLigne) {
 function construireVerrouille(d, horsLigne, famille) {
   const w = new ListWidget();
   w.url = d.urlEliasse;
-  const { etat, reprise } = etatSeance(d, horsLigne);
+  const { etat, reprise: rep } = etatSeance(d, horsLigne);
   const p = d.prochain;
   const ancien = estAncien(d, horsLigne) ? ` (${hm(d.genereLe)})` : "";
 
   if (famille === "accessoryInline") {
-    texte(w, etat === "levee" ? `Séance levée · reprise ${quandReprise(reprise) || ""}`
+    texte(w, etat === "levee" ? `Séance levée · reprise ${repriseEnClair(rep)}`
       : p ? `n° ${p.numero} · ${d.article || ""} · ${d.restants ?? "?"} rest.` : "En séance", 12);
     return w;
   }
   if (famille === "accessoryCircular") {
     w.addAccessoryWidgetBackground = true;
-    const t1 = texte(w, etat === "levee" ? (reprise ? hm(reprise) : "--") : (d.restants ?? "--"), 14, { gras: true });
+    const t1 = texte(w, etat === "levee" ? (rep ? hm(rep) : "--") : (d.restants ?? "--"), 14, { gras: true });
     t1.centerAlignText();
     const t2 = texte(w, etat === "levee" ? "reprise" : "rest.", 9);
     t2.centerAlignText();
@@ -275,7 +335,7 @@ function construireVerrouille(d, horsLigne, famille) {
   // accessoryRectangular : 3 lignes
   if (etat === "levee") {
     texte(w, "Séance levée", 14, { gras: true });
-    texte(w, `Reprise ${quandReprise(reprise) || "à préciser"}`, 12);
+    texte(w, `Reprise ${repriseEnClair(rep)}`, 12);
     texte(w, `${d.texte ? d.texte.court : ""}${ancien}`, 11);
   } else if (etat === "qag") {
     texte(w, "Questions au Gouv.", 14, { gras: true });
