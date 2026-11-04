@@ -149,12 +149,22 @@ function blocAmendement(pile, d, grand) {
   n.bottomAlignContent();
   texte(n, "n°", 11, { couleur: COULEURS.secondaire, poids: "medium" });
   n.addSpacer(3);
-  texte(n, p.numero, grand ? 30 : 26, { gras: true });
+  texte(n, p.numero, grand ? 34 : 28, { gras: true });
+  pile.addSpacer(1);
   const a = pile.addStack();
   a.layoutHorizontally();
-  a.bottomAlignContent();
+  a.centerAlignContent();
   texte(a, p.auteur || "", 11.5, { poids: "medium" });
-  if (p.groupe) { a.addSpacer(5); texte(a, p.groupe, 11.5, { gras: true, couleur: COULEURS[p.bloc] || COULEURS.autres }); }
+  if (p.groupe) { a.addSpacer(6); pastille(a, p.groupe, p.bloc); }
+}
+
+/** Petite pastille arrondie aux couleurs du bloc (texte foncé sur le jaune, blanc sinon). */
+function pastille(pile, libelle, bloc) {
+  const b = pile.addStack();
+  b.backgroundColor = COULEURS[bloc] || COULEURS.autres;
+  b.cornerRadius = 4;
+  b.setPadding(1, 5, 1, 5);
+  texte(b, libelle, 10, { gras: true, couleur: bloc === "socle" ? new Color("#1C1C1E") : new Color("#FFFFFF") });
 }
 
 function construirePetit(d, horsLigne) {

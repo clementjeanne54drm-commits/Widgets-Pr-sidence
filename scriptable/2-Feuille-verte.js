@@ -108,16 +108,18 @@ function jourAffiche(d) {
 }
 
 /** Une ligne par point : « Suite · PLF 2027 » + stade en gris. */
-function lignePoint(pile, p, taille) {
+function lignePoint(pile, p, taille, estompe = false) {
   const l = pile.addStack();
   l.layoutHorizontally();
   l.bottomAlignContent();
+  // séance déjà terminée : tout le texte passe en gris
+  const principal = estompe ? COULEURS.secondaire : COULEURS.texte;
   if (p.type === "qag" || p.type === "qosd") {
-    texte(l, p.court, taille, { poids: "semi" });
+    texte(l, p.court, taille, { poids: "semi", couleur: principal });
     return;
   }
   if (p.prefixe) { texte(l, p.prefixe, taille, { couleur: COULEURS.secondaire }); l.addSpacer(4); }
-  texte(l, p.court, taille, { poids: "semi" });
+  texte(l, p.court, taille, { poids: "semi", couleur: principal });
   if (p.stade) { l.addSpacer(5); texte(l, p.stade, taille - 1.5, { couleur: COULEURS.secondaire }); }
 }
 
@@ -131,16 +133,20 @@ function afficherSeances(w, jour, taille, lignesMax, filets) {
     const rang = w.addStack();
     rang.layoutHorizontally();
     rang.topAlignContent();
+    // état de la séance : en cours (vert), terminée (grisée), à venir (normale)
+    const debut = Date.parse(s.debut), suivante = jour.seances[i + 1] ? Date.parse(jour.seances[i + 1].debut) : debut + 5 * 3600e3;
+    const etat = Date.now() >= suivante ? "passee" : Date.now() >= debut ? "encours" : "avenir";
     const col = rang.addStack();
+    col.layoutVertically();
     col.size = new Size(taille >= 13 ? 50 : 44, 0);
-    texte(col, s.heure, taille, { gras: true });
-    col.addSpacer();
+    texte(col, s.heure, taille, { gras: true, couleur: etat === "encours" ? COULEURS.accent : etat === "passee" ? COULEURS.secondaire : COULEURS.texte });
+    if (etat === "encours") texte(col, "en cours", 8, { poids: "semi", couleur: COULEURS.accent });
     const pts = rang.addStack();
     pts.layoutVertically();
     const points = s.points.length ? s.points : [{ type: "autre", court: "Ordre du jour à venir" }];
     const place = Math.max(1, lignesMax - lignes);
     const visibles = points.length > place ? points.slice(0, place - 1) : points;
-    for (const p of visibles) lignePoint(pts, p, taille);
+    for (const p of visibles) lignePoint(pts, p, taille, etat === "passee");
     if (visibles.length < points.length) texte(pts, `+ ${points.length - visibles.length} autre(s) point(s)`, taille - 2, { couleur: COULEURS.secondaire });
     lignes += Math.min(points.length, place);
   }

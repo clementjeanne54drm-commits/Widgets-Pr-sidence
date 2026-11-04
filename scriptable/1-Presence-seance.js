@@ -31,7 +31,7 @@ const COULEURS = {
   autres:     dyn("#8E8E93", "#98989D"),
 };
 // Couleurs « fixes » pour le demi-cercle (une image ne suit pas le mode sombre : teintes moyennes)
-const POINTS = { gauche: "#E03A3E", socle: "#F2B705", rn: "#2F62C0", autres: "#8E8E93", vide: ["#8E8E93", 0.25] };
+const POINTS = { gauche: "#E03A3E", socle: "#F2B705", rn: "#2F62C0", autres: "#8E8E93", vide: ["#8E8E93", 0.32] };
 const ORDRE_BLOCS = ["gauche", "autres", "socle", "rn"];            // de gauche à droite dans l'hémicycle
 const NOMS_BLOCS = { gauche: "Gauche", socle: "Socle", rn: "RN-UDR", autres: "Autres" };
 
@@ -156,12 +156,17 @@ function dessinerHemicycle(d, largeur, hauteur) {
 // ==========================================================================
 // Construction du widget
 // ==========================================================================
-function ligneBlocs(pile, d, taille) {
+const LEGENDE = { gauche: "Gauche", socle: "Socle", rn: "RN-UDR", autres: "Autres" };
+/** Chiffre de chaque bloc en couleur ; avec légende, un libellé discret dessous. */
+function ligneBlocs(pile, d, taille, legende = false) {
   const l = pile.addStack();
   l.layoutHorizontally();
   for (const bloc of ["gauche", "socle", "rn", "autres"]) {
-    texte(l, d.dernier.blocs[bloc], taille, { gras: true, couleur: COULEURS[bloc] });
-    if (bloc !== "autres") l.addSpacer(7);
+    const c = l.addStack();
+    c.layoutVertically();
+    texte(c, d.dernier.blocs[bloc], taille, { gras: true, couleur: COULEURS[bloc] });
+    if (legende) texte(c, LEGENDE[bloc], 7.5, { couleur: COULEURS.secondaire });
+    if (bloc !== "autres") l.addSpacer(legende ? 6 : 7);
   }
 }
 
@@ -194,7 +199,7 @@ function construireMoyen(d, horsLigne) {
   total.addSpacer(4);
   texte(total, `/ ${d.sieges} · ${String(d.dernier.pourcentage).replace(".", ",")} %`, 11, { couleur: COULEURS.secondaire, poids: "medium" });
   g.addSpacer(1);
-  ligneBlocs(g, d, 12);
+  ligneBlocs(g, d, 13, true);
 
   corps.addSpacer(10);
 
