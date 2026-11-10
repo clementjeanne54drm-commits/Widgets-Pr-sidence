@@ -2,7 +2,7 @@
 #
 # Pourquoi une boucle ? Les tâches planifiées de GitHub ne partent pas à l'heure (retards de
 # 5 à 15 min, passages parfois sautés). On déclenche donc un passage toutes les 30 min ; pendant
-# une séance, ce passage reste actif ~28 min et régénère les données lui-même toutes les 5 min.
+# une séance, ce passage reste actif ~28-30 min et régénère les données lui-même toutes les 5 min.
 # Hors séance, il fait un seul passage rapide (le script ne travaille qu'une fois par heure).
 #
 # Les widgets lisent ensuite :
@@ -67,7 +67,8 @@ jobs:
             # on continue seulement si une séance est en cours et qu'il reste du temps avant le passage suivant
             grep -q "actif=1" /tmp/sortie 2>/dev/null || break
             ecoule=$(( $(date +%s) - debut ))
-            [ $ecoule -lt $((25 * 60)) ] || break
+            # jusqu'à ~28 min : le passage suivant (toutes les 30 min) prend le relais sans trou
+            [ $ecoule -lt $((27 * 60)) ] || break
             sleep $(( 300 - ( $(date +%s) - debut ) % 300 ))
           done
           echo "$tour passage(s) effectué(s)."

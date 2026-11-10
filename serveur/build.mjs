@@ -429,13 +429,24 @@ async function construirePresence(leg, amo, plan, etat) {
   catch (e) { log('scrutins (site) en échec, repli open data :', e.message); scrutins = await scrutinsDepuisOpenData(leg, amo); source = 'open data (J-1)'; }
 
   // Heure du scrutin : l'Assemblée ne la publie pas. On note l'heure à laquelle le serveur l'a VU
-  // pour la première fois, seulement si le passage précédent date de moins de 12 min (sinon : inconnue).
+  // pour la première fois :
+  //  - passage précédent il y a moins de 12 min : heure exacte (à 5 min près) ;
+  //  - entre 12 min et 3 h : heure ESTIMÉE, répartie entre les deux passages (affichée « ~22h45 ») ;
+  //  - au-delà (nuit, premier passage) : inconnue, le widget affiche le numéro du scrutin.
   etat.vus ??= {};
-  const suivi = etat.dernierPassage && Date.now() - etat.dernierPassage < 12 * MIN;
+  const maintenant = Date.now(), precedent = etat.dernierPassage;
+  const ecart = precedent ? maintenant - precedent : Infinity;
+  const nouveaux = scrutins.filter(s => !(`${leg}-${s.numero}` in etat.vus)).sort((a, b) => a.numero - b.numero);
+  nouveaux.forEach((s, i) => {
+    let vu = null;
+    if (ecart < 12 * MIN) vu = { t: new Date(maintenant).toISOString(), approx: false };
+    else if (ecart < 3 * H) vu = { t: new Date(precedent + (i + 1) / (nouveaux.length + 1) * ecart).toISOString(), approx: true };
+    etat.vus[`${leg}-${s.numero}`] = vu;
+  });
   for (const s of scrutins) {
-    const cle = `${leg}-${s.numero}`;
-    if (!(cle in etat.vus)) etat.vus[cle] = suivi ? new Date().toISOString() : null;
-    s.vuA = etat.vus[cle];
+    const vu = etat.vus[`${leg}-${s.numero}`];
+    s.vuA = typeof vu === 'string' ? vu : vu?.t ?? null;          // (ancien format : simple chaîne)
+    s.vuApprox = !!vu?.approx;
   }
   const d = scrutins[0];
   const blocs = { gauche: 0, socle: 0, rn: 0, autres: 0 };
@@ -450,13 +461,13 @@ async function construirePresence(leg, amo, plan, etat) {
     hemicycle: hemicycleReel(amo, plan, d.votantsIds ? new Set(d.votantsIds) : null),
     avertissement: "L'Assemblée ne publie pas la présence en temps réel : il s'agit des votants du dernier scrutin public, délégations de vote comprises.",
     dernier: {
-      numero: d.numero, url: d.url, titre: d.titre, titreCourt: d.titreCourt, seance: d.seance, date: d.date, vuA: d.vuA,
+      numero: d.numero, url: d.url, titre: d.titre, titreCourt: d.titreCourt, seance: d.seance, date: d.date, vuA: d.vuA, vuApprox: d.vuApprox,
       votants: d.votants, pourcentage: Math.round(1000 * d.votants / SIEGES) / 10, blocs,
       groupes: d.groupes.map(({ abrev, bloc, votants, membres }) => ({ abrev, bloc, votants, membres })),
       presentsPhysiquement: d.presentsPhysiquement ?? null,
     },
-    scrutins: scrutins.map(({ numero, url, titreCourt, date, vuA, sort, pour, contre, abstention, votants }) =>
-      ({ numero, url, titreCourt, date, vuA, sort, pour, contre, abstention, votants })),
+    scrutins: scrutins.map(({ numero, url, titreCourt, date, vuA, vuApprox, sort, pour, contre, abstention, votants }) =>
+      ({ numero, url, titreCourt, date, vuA, vuApprox, sort, pour, contre, abstention, votants })),
   };
 }
 

@@ -248,8 +248,11 @@ function dessinerHemicycleSchema(d, largeur, hauteur) {
 // Briques d'affichage
 // ==========================================================================
 /** Libellé honnête de la source : « d'après le scrutin de 14h32 » (ou son numéro si l'heure est inconnue). */
+/** Heure d'un scrutin : « 22h48 », « ~22h45 » si elle est estimée, sinon son numéro. */
+const heureScrutin = s => s.vuA ? `${s.vuApprox ? "~" : ""}${hm(s.vuA)}` : `n° ${s.numero}`;
+
 const libelleScrutin = d => d.dernier.vuA
-  ? `d'après le scrutin de ${hm(d.dernier.vuA)}`
+  ? `d'après le scrutin de ${heureScrutin(d.dernier)}`
   : `d'après le scrutin n° ${d.dernier.numero} (${jourCourt(d.dernier.date)})`;
 
 /** Total en grand + pourcentage. */
@@ -326,7 +329,7 @@ function ligneScrutin(pile, s) {
   l1.centerAlignContent();
   texte(l1, s.titreCourt, 11.5, { poids: "semi" });
   l1.addSpacer();
-  texte(l1, s.vuA ? hm(s.vuA) : `n° ${s.numero}`, 10, { poids: "medium", couleur: COULEURS.secondaire });
+  texte(l1, heureScrutin(s), 10, { poids: "medium", couleur: COULEURS.secondaire });
   c.addSpacer(3);
   const l2 = c.addStack();
   l2.layoutHorizontally();
@@ -371,14 +374,26 @@ function construireMoyen(d, horsLigne) {
   texte(t, d.dernier.votants, 26, { poids: "lourd" });
   t.addSpacer(4);
   texte(t, `${virgule(d.dernier.pourcentage)} %`, 13, { gras: true });
-  texte(g, `votants sur ${d.sieges}`, 9.5, { couleur: COULEURS.secondaire });
+  texte(g, `votants sur ${d.sieges}, délég. incluses`, 8.5, { couleur: COULEURS.secondaire });
 
   corps.addSpacer(10);
   const dr = carte(corps, { padding: [7, 9, 7, 9] });
   grilleGroupes(dr, d, 2, 10.5, 2.5);
 
+  // ligne des derniers scrutins publics : heure + résultat (le plus récent à gauche)
   w.addSpacer();
-  texte(w, `${libelleScrutin(d).replace(/^d/, "D")} · délégations comprises · pas de temps réel`, 8.5, { couleur: COULEURS.secondaire });
+  const ligne = w.addStack();
+  ligne.layoutHorizontally();
+  ligne.centerAlignContent();
+  texte(ligne, "Scrutins", 9, { gras: true, couleur: COULEURS.secondaire });
+  d.scrutins.slice(0, 3).forEach(s => {
+    ligne.addSpacer(7);
+    texte(ligne, heureScrutin(s), 10, { gras: true });
+    ligne.addSpacer(3);
+    const adopte = s.sort === "adopté";
+    pastille(ligne, adopte ? "ADOPTÉ" : "REJETÉ", adopte ? COULEURS.vert : COULEURS.secondaire, new Color("#FFFFFF"), 7.5);
+  });
+  ligne.addSpacer();
   return w;
 }
 
@@ -430,7 +445,7 @@ function construirePetit(d, horsLigne) {
   w.addSpacer(3);
   ligneBlocs(w, d, 10);
   w.addSpacer();
-  texte(w, d.dernier.vuA ? `scrutin de ${hm(d.dernier.vuA)}` : `scrutin n° ${d.dernier.numero}`, 8.5, { couleur: COULEURS.secondaire });
+  texte(w, d.dernier.vuA ? `scrutin de ${heureScrutin(d.dernier)}` : `scrutin n° ${d.dernier.numero}`, 8.5, { couleur: COULEURS.secondaire });
   return w;
 }
 
